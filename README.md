@@ -1,4 +1,4 @@
-# `mkplot`
+# mkplot
 
 A [gnuplot](http://www.gnuplot.info) config file generator, writes to `stdout`, so can be piped straight into `gnuplot` (no need to save configuration to a file) or saved to a file as a starting point for more complex plots.
 
