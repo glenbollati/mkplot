@@ -1,0 +1,180 @@
+#!/bin/sh
+XFMT='"%b\n%Y"'
+MOUSEFMT='3'
+FONT="JetBrains Mono, 20"
+
+die() { printf "%s\n" "$*" >&2; exit 1; }
+get_col_name(){ echo "$COLS" | grep -m 1 "$1" | cut -f 2 | sed 's/_/ /g'; }
+print_available(){ echo "$COLS" | cut -f 2; }
+
+print_help() {
+	echo "mkplot writes a gnuplot config to stdout (can pipe straight into gnuplot)"
+	echo "filling a template with the provided parameters"
+	echo
+	echo "USAGE: mkplot <data_file> <OPTIONS>"
+	echo "   or: mkplot help"
+	echo
+	echo "OPTIONS:"
+	echo "  list     print column headers and exit"
+	echo "  type     sets the type of plot to generate (default or date)"
+	echo "  x        set column (by name) to use as x axis"
+	echo "  y        set column (by name) to use as y axis"
+	echo "  y2       set column (by name) to use as secondary y axis"
+	echo "  xlabel   set x axis label"
+	echo "  ylabel   set y axis label"
+	echo "  y2label  set secondary y axis label"
+	echo "  save     set file to save to"
+	echo "  title    set title"
+	echo "  smooth   set smoothing mode"
+	echo "  lw       set line width"
+	echo "  sep      set separator"
+}
+
+set_col_nums(){
+	i=1
+	for name in $(head -1 "$FILE" | sed 's/,/ /g'); do
+		COLS="$COLS\n$i	$name"
+		i=$((i + 1))
+	done
+}
+
+get_col_nums(){
+	for name in $@; do
+		echo "$COLS" | grep -m 1 "$name" | cut -f 1
+	done
+}
+
+fill_template() {
+	printf "%s\n" "
+	set datafile separator '$SEPARATOR'
+	set title '$TITLE'
+	set termopt enhanced
+	$EXPORT
+	pause mouse close
+	set mouse mouseformat $MOUSEFMT
+
+	set key left Left reverse box samplen 2 width 2
+	set style data lines
+
+	# set xdata time
+	# set timefmt $TIMEFMT
+	# set format x $XFMT
+	set xlabel '$XLABEL'
+
+	set tics nomirror 
+	set xtics autofreq; set ytics autofreq
+	set lt 1 lc rgb 'black'; set lt 2 lc rgb 'red'
+
+	set ylabel '$YLABEL'
+
+	$PLOTS
+	"
+}
+
+fill_date_template(){
+	printf "%s\n" "
+	set datafile separator '$SEPARATOR'
+	set title '$TITLE'
+	set termopt enhanced
+	$EXPORT
+	pause mouse close
+	set mouse mouseformat $MOUSEFMT
+
+	set key left Left reverse box samplen 2 width 2
+	set style data lines
+
+	set xdata time
+	set timefmt $TIMEFMT
+	set format x $XFMT
+	set xlabel '$XLABEL'
+
+	set tics nomirror 
+	set xtics autofreq; set ytics autofreq
+	set lt 1 lc rgb 'black'; set lt 2 lc rgb 'red'
+
+	set ylabel '$YLABEL'
+
+	$PLOTS
+	"
+}
+
+plot(){
+	PLOTS="plot"
+	for Y in $YDATA; do
+		YTITLE="$(get_col_name $Y)"
+		PLOTS="$PLOTS '$FILE' using $X:$Y $SMOOTH title '$YTITLE' $LINEWIDTH,"
+	done
+
+	case "$PLOT_TYPE" in
+		"default") fill_template ;;
+		"date")     fill_date_template ;;
+		*) die "Unrecognised plot type: $PLOT_TYPE" ;;
+	esac
+}
+
+plot2y(){
+	PLOTS="set y2tics autofreq; set y2label '$Y2LABEL'; plot"
+	for Y in $YDATA; do
+		YTITLE="$(get_col_name $Y)"
+		PLOTS="$PLOTS '$FILE' using $X:$Y $SMOOTH title '$YTITLE' $LINEWIDTH axes x1y1,"
+	done
+
+	for Y2 in $Y2DATA; do
+		Y2TITLE="$(get_col_name $Y2)"
+		PLOTS="$PLOTS '$FILE' using $X:$Y2 $SMOOTH title '$Y2TITLE' $LINEWIDTH axes x1y2,"
+	done
+
+	case "$PLOT_TYPE" in
+		"default") fill_template ;;
+		"date")     fill_date_template ;;
+		*) die "Unrecognised plot type: $PLOT_TYPE" ;;
+	esac
+}
+
+case "$1" in "help"|"--help"|"-h"|"")
+	print_help
+	exit 0 ;;
+esac
+
+[ -f "$1" ] && FILE="$1" || die "(mkplot) error: first argument must be data file - file '${1}' not found!"
+shift
+
+set_col_nums
+
+# Defaults
+LINEWIDTH="lw 3"
+TIMEFMT="'%Y-%m-%d'"
+SEPARATOR=","
+PLOT_TYPE=default
+
+while [ -n "$1" ]; do
+	case "$1" in
+		"list")    print_available        ; exit 0 ;;
+		"type")    PLOT_TYPE="$2"         ; shift ;;
+		"x")       X="$(get_col_nums $2)" ; shift ;;
+		"y")       Y="$Y $2"              ; shift ;;
+		"y2")      Y2="$Y2 $2"            ; shift ;;
+		"xlabel")  XLABEL="$2"            ; shift ;;
+		"ylabel")  YLABEL="$2"            ; shift ;;
+		"y2label") Y2LABEL="$2"           ; shift ;;
+		"save")    SAVE_TO="$2"           ; shift ;;
+		"title")   TITLE="$2"             ; shift ;;
+		"smooth")  SMOOTH="smooth $2"     ; shift ;;
+		"lw")      LINEWIDTH="lw $2"      ; shift ;;
+		"sep")     SEPARATOR="$2"         ; shift ;;
+		# "filter")  FILTER="$2"               ; shift ;;
+		# "from")    FROM="$(get_col_nums $2)" ; shift ;;
+		# "to")      TO="$(get_col_nums $2)"   ; shift ;;
+	esac
+	shift
+done
+
+if [ -n "$SAVE_TO" ]; then
+	EXPORT="set terminal pngcairo size 1920,1080 enhanced font '$FONT'"
+	EXPORT="$EXPORT; set output '$SAVE_TO'"
+fi
+
+YDATA="$(get_col_nums "$Y")"
+Y2DATA="$(get_col_nums "$Y2")"
+
+[ -z "$Y2" ] && plot || plot2y
